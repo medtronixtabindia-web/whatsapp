@@ -41,11 +41,13 @@ const HANDOFF_QUEUE = '__queue__';
 const PROVIDER_LABEL: Record<AiProvider, string> = {
   openai: 'OpenAI',
   anthropic: 'Anthropic (Claude)',
+  openai_compatible: 'Local / OpenAI-compatible',
 };
 
 const KEY_PLACEHOLDER: Record<AiProvider, string> = {
   openai: 'sk-...',
   anthropic: 'sk-ant-...',
+  openai_compatible: 'Optional bearer token',
 };
 
 export function AiConfig() {
@@ -62,6 +64,7 @@ export function AiConfig() {
   const [provider, setProvider] = useState<AiProvider>('openai');
   const [model, setModel] = useState(AI_PROVIDER_DEFAULT_MODEL.openai);
   const [apiKey, setApiKey] = useState('');
+  const [baseUrl, setBaseUrl] = useState('');
   const [keyEdited, setKeyEdited] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [hasStoredKey, setHasStoredKey] = useState(false);
@@ -95,6 +98,7 @@ export function AiConfig() {
         setConfigured(true);
         setProvider(data.provider);
         setModel(data.model);
+        setBaseUrl(data.base_url ?? '');
         setSystemPrompt(data.system_prompt ?? '');
         setIsActive(data.is_active);
         setAutoReplyEnabled(data.auto_reply_enabled);
@@ -145,6 +149,7 @@ export function AiConfig() {
     provider,
     model: model.trim(),
     api_key: keyPayload(),
+    base_url: provider === 'openai_compatible' ? baseUrl.trim() : null,
     embeddings_api_key: embeddingsKeyPayload(),
     system_prompt: systemPrompt.trim() || null,
     is_active: isActive,
@@ -163,6 +168,7 @@ export function AiConfig() {
           provider,
           model: model.trim(),
           api_key: keyPayload(),
+          base_url: provider === 'openai_compatible' ? baseUrl.trim() : null,
         }),
       });
       const data = await res.json();
@@ -180,8 +186,12 @@ export function AiConfig() {
       toast.error(t('missingModel'));
       return;
     }
-    if (!configured && !keyEdited) {
+    if (!configured && !keyEdited && provider !== 'openai_compatible') {
       toast.error(t('missingApiKey'));
+      return;
+    }
+    if (provider === 'openai_compatible' && !baseUrl.trim()) {
+      toast.error('Enter the HTTPS base URL for your local AI provider.');
       return;
     }
     setSaving(true);
@@ -281,6 +291,9 @@ export function AiConfig() {
                     <SelectItem value="anthropic">
                       {PROVIDER_LABEL.anthropic}
                     </SelectItem>
+                    <SelectItem value="openai_compatible">
+                      {PROVIDER_LABEL.openai_compatible}
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -297,8 +310,27 @@ export function AiConfig() {
               </div>
             </div>
 
+            {provider === 'openai_compatible' && (
+              <div className="space-y-2">
+                <Label htmlFor="ai-base-url">Provider base URL</Label>
+                <Input
+                  id="ai-base-url"
+                  value={baseUrl}
+                  onChange={(e) => setBaseUrl(e.target.value)}
+                  placeholder="https://your-ai-host.example/v1"
+                  disabled={disabled}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Ollama uses an OpenAI-compatible endpoint ending in /v1. The live
+                  Vercel app requires a publicly reachable HTTPS URL.
+                </p>
+              </div>
+            )}
+
             <div className="space-y-2">
-              <Label htmlFor="ai-key">{t('apiKey')}</Label>
+              <Label htmlFor="ai-key">
+                {t('apiKey')}{provider === 'openai_compatible' ? ' (optional)' : ''}
+              </Label>
               <div className="flex gap-2">
                 <div className="relative flex-1">
                   <Input

@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
-import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
+import {
+  checkRateLimit,
+  rateLimitResponse,
+  RATE_LIMITS,
+} from '@/lib/rate-limit'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { validateAiCredentials } from '@/lib/ai/validate'
 import { AiError, type AiProvider } from '@/lib/ai/types'
@@ -23,14 +27,24 @@ export async function POST(request: Request) {
 
     const body = await request.json().catch(() => null)
     if (!body || typeof body !== 'object') {
-      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'Invalid request body' },
+        { status: 400 }
+      )
     }
 
     const provider = body.provider as AiProvider
-    if (provider !== 'openai' && provider !== 'anthropic') {
+    if (
+      provider !== 'openai' &&
+      provider !== 'anthropic' &&
+      provider !== 'openai_compatible'
+    ) {
       return NextResponse.json(
-        { error: 'provider must be "openai" or "anthropic"' },
-        { status: 400 },
+        {
+          error:
+            'provider must be "openai", "anthropic", or "openai_compatible"',
+        },
+        { status: 400 }
       )
     }
     const model = typeof body.model === 'string' ? body.model.trim() : ''
@@ -38,9 +52,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'model is required' }, { status: 400 })
     }
 
+    const baseUrl =
+      typeof body.base_url === 'string' ? body.base_url.trim() : ''
+    if (provider === 'openai_compatible' && !baseUrl) {
+      return NextResponse.json(
+        { error: 'A local AI base URL is required.' },
+        { status: 400 }
+      )
+    }
+
     const rawKey = typeof body.api_key === 'string' ? body.api_key.trim() : ''
-    let apiKeyPlain = rawKey
-    if (!apiKeyPlain) {
+    let apiKeyPlain: string | null = rawKey || null
+    if (!apiKeyPlain && provider !== 'openai_compatible') {
       const { data: existing } = await supabase
         .from('ai_configs')
         .select('api_key')
@@ -49,15 +72,17 @@ export async function POST(request: Request) {
       if (!existing?.api_key) {
         return NextResponse.json(
           { error: 'Enter an API key to test.' },
-          { status: 400 },
+          { status: 400 }
         )
       }
       try {
         apiKeyPlain = decrypt(existing.api_key)
       } catch {
         return NextResponse.json(
-          { error: 'Stored API key could not be decrypted — re-enter your key.' },
-          { status: 400 },
+          {
+            error: 'Stored API key could not be decrypted — re-enter your key.',
+          },
+          { status: 400 }
         )
       }
     }
@@ -67,6 +92,7 @@ export async function POST(request: Request) {
         provider,
         model,
         apiKey: apiKeyPlain,
+        baseUrl: provider === 'openai_compatible' ? baseUrl : null,
         systemPrompt: null,
         isActive: true,
         autoReplyEnabled: false,
@@ -78,13 +104,13 @@ export async function POST(request: Request) {
       if (err instanceof AiError) {
         return NextResponse.json(
           { error: err.message, code: err.code },
-          { status: 400 },
+          { status: 400 }
         )
       }
       console.error('[ai/test] validation error:', err)
       return NextResponse.json(
         { error: 'Could not validate the API key.' },
-        { status: 400 },
+        { status: 400 }
       )
     }
 

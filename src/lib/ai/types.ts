@@ -6,7 +6,7 @@
 // whether the account is on OpenAI or Anthropic.
 // ============================================================
 
-export type AiProvider = 'openai' | 'anthropic'
+export type AiProvider = 'openai' | 'anthropic' | 'openai_compatible'
 
 /**
  * Account AI setup, decrypted and ready to use. Produced by
@@ -16,7 +16,9 @@ export type AiProvider = 'openai' | 'anthropic'
 export interface AiConfig {
   provider: AiProvider
   model: string
-  apiKey: string
+  apiKey: string | null
+  /** Base URL for a self-hosted OpenAI-compatible API, such as Ollama. */
+  baseUrl?: string | null
   systemPrompt: string | null
   isActive: boolean
   autoReplyEnabled: boolean

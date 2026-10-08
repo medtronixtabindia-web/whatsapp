@@ -5,7 +5,8 @@ import { AiError, type AiUsage, type ChatMessage } from '../types'
 // ============================================================
 
 export interface ProviderArgs {
-  apiKey: string
+  apiKey: string | null
+  baseUrl?: string | null
   model: string
   systemPrompt: string
   messages: ChatMessage[]
@@ -55,11 +56,13 @@ export function toNetworkError(err: unknown): AiError {
  *  provider's own error message out of the JSON body when present. */
 export async function providerHttpError(
   provider: string,
-  res: Response,
+  res: Response
 ): Promise<AiError> {
   let detail = ''
   try {
-    const body = (await res.json()) as { error?: { message?: string } | string }
+    const body = (await res.json()) as {
+      error?: { message?: string } | string
+    }
     detail =
       typeof body?.error === 'string'
         ? body.error

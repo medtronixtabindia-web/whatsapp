@@ -29,7 +29,9 @@ function normalizeForAnthropic(messages: ChatMessage[]): ChatMessage[] {
     merged.shift()
   }
   if (merged.length === 0) {
-    return [{ role: 'user', content: '(The customer has not sent a message yet.)' }]
+    return [
+      { role: 'user', content: '(The customer has not sent a message yet.)' },
+    ]
   }
   return merged
 }
@@ -39,7 +41,9 @@ function normalizeForAnthropic(messages: ChatMessage[]): ChatMessage[] {
  * Returns the raw assistant text + token usage (handoff parsing happens
  * in `generateReply`).
  */
-export async function generateAnthropic(args: ProviderArgs): Promise<ProviderResult> {
+export async function generateAnthropic(
+  args: ProviderArgs
+): Promise<ProviderResult> {
   const { apiKey, model, systemPrompt, messages, timeoutMs } = args
 
   let res: Response
@@ -47,7 +51,7 @@ export async function generateAnthropic(args: ProviderArgs): Promise<ProviderRes
     res = await fetch(ANTHROPIC_URL, {
       method: 'POST',
       headers: {
-        'x-api-key': apiKey,
+        'x-api-key': apiKey ?? '',
         'anthropic-version': ANTHROPIC_VERSION,
         'Content-Type': 'application/json',
       },

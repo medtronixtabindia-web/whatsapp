@@ -3,7 +3,7 @@ import { decrypt } from '@/lib/whatsapp/encryption'
 import type { AiConfig } from './types'
 
 interface AiConfigRow {
-  provider: 'openai' | 'anthropic'
+  provider: 'openai' | 'anthropic' | 'openai_compatible'
   model: string
   api_key: string
   system_prompt: string | null
@@ -12,10 +12,11 @@ interface AiConfigRow {
   auto_reply_max_per_conversation: number
   handoff_agent_id: string | null
   embeddings_api_key: string | null
+  base_url: string | null
 }
 
 const CONFIG_COLUMNS =
-  'provider, model, api_key, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, embeddings_api_key'
+  'provider, model, api_key, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, embeddings_api_key, base_url'
 
 /**
  * Load and decrypt the account's AI config for *use* (draft or
@@ -31,7 +32,7 @@ const CONFIG_COLUMNS =
 export async function loadAiConfig(
   db: SupabaseClient,
   accountId: string,
-  opts: { requireActive?: boolean } = {},
+  opts: { requireActive?: boolean } = {}
 ): Promise<AiConfig | null> {
   const { requireActive = true } = opts
   const { data, error } = await db
@@ -50,7 +51,7 @@ export async function loadAiConfig(
   // Defensive: the column is NOT NULL, but a partial write / manual DB
   // edit could leave it empty. Treat a missing key as "not configured"
   // rather than letting decrypt() throw on null.
-  if (!row.api_key) return null
+  if (!row.api_key && row.provider !== 'openai_compatible') return null
 
   // The embeddings key is optional and independent of the chat key —
   // a corrupt/undecryptable one should downgrade to lexical KB, not
@@ -63,7 +64,7 @@ export async function loadAiConfig(
       // Not silent — a rotated/mismatched ENCRYPTION_KEY here means
       // semantic search quietly stops working, so leave a breadcrumb.
       console.error(
-        `[ai config] embeddings key for account ${accountId} could not be decrypted — check ENCRYPTION_KEY; semantic search is disabled until it is re-entered.`,
+        `[ai config] embeddings key for account ${accountId} could not be decrypted — check ENCRYPTION_KEY; semantic search is disabled until it is re-entered.`
       )
       embeddingsApiKey = null
     }
@@ -72,7 +73,8 @@ export async function loadAiConfig(
   return {
     provider: row.provider,
     model: row.model,
-    apiKey: decrypt(row.api_key),
+    apiKey: row.api_key ? decrypt(row.api_key) : null,
+    baseUrl: row.base_url,
     systemPrompt: row.system_prompt,
     isActive: row.is_active,
     autoReplyEnabled: row.auto_reply_enabled,
@@ -95,7 +97,7 @@ export async function loadAiConfig(
  */
 export async function loadEmbeddingsKey(
   db: SupabaseClient,
-  accountId: string,
+  accountId: string
 ): Promise<{ key: string | null; corrupt: boolean }> {
   const { data, error } = await db
     .from('ai_configs')
@@ -107,7 +109,7 @@ export async function loadEmbeddingsKey(
     return { key: decrypt(data.embeddings_api_key), corrupt: false }
   } catch {
     console.error(
-      `[ai config] embeddings key for account ${accountId} could not be decrypted — check ENCRYPTION_KEY.`,
+      `[ai config] embeddings key for account ${accountId} could not be decrypted — check ENCRYPTION_KEY.`
     )
     return { key: null, corrupt: true }
   }

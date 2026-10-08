@@ -24,7 +24,9 @@ interface OpenAiResponse {
  * Returns the raw assistant text + token usage (handoff parsing happens
  * in `generateReply`).
  */
-export async function generateOpenAi(args: ProviderArgs): Promise<ProviderResult> {
+export async function generateOpenAi(
+  args: ProviderArgs
+): Promise<ProviderResult> {
   const { apiKey, model, systemPrompt, messages, timeoutMs } = args
 
   let res: Response
@@ -32,7 +34,7 @@ export async function generateOpenAi(args: ProviderArgs): Promise<ProviderResult
     res = await fetch(OPENAI_URL, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${apiKey ?? ''}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({

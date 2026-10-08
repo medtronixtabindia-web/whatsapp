@@ -4,7 +4,11 @@ import {
   requireRole,
   toErrorResponse,
 } from '@/lib/auth/account'
-import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
+import {
+  checkRateLimit,
+  rateLimitResponse,
+  RATE_LIMITS,
+} from '@/lib/rate-limit'
 import { encrypt, decrypt } from '@/lib/whatsapp/encryption'
 import { validateAiCredentials } from '@/lib/ai/validate'
 import { embedTexts } from '@/lib/ai/embeddings'
@@ -30,7 +34,7 @@ export async function GET() {
       // `api_key` is selected only to derive `has_key` — it is stripped
       // out below and never returned to the client.
       .select(
-        'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, api_key, embeddings_api_key',
+        'provider, model, base_url, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, api_key, embeddings_api_key'
       )
       .eq('account_id', accountId)
       .maybeSingle()
@@ -39,7 +43,7 @@ export async function GET() {
       console.error('[ai/config GET] fetch error:', error)
       return NextResponse.json(
         { error: 'Failed to load AI configuration' },
-        { status: 500 },
+        { status: 500 }
       )
     }
 
@@ -78,11 +82,34 @@ export async function POST(request: Request) {
     if (!body || typeof body !== 'object') return bad('Invalid request body')
 
     const provider = body.provider as AiProvider
-    if (provider !== 'openai' && provider !== 'anthropic') {
-      return bad('provider must be "openai" or "anthropic"')
+    if (
+      provider !== 'openai' &&
+      provider !== 'anthropic' &&
+      provider !== 'openai_compatible'
+    ) {
+      return bad(
+        'provider must be "openai", "anthropic", or "openai_compatible"'
+      )
     }
     const model = typeof body.model === 'string' ? body.model.trim() : ''
     if (!model) return bad('model is required')
+
+    const baseUrl =
+      typeof body.base_url === 'string' ? body.base_url.trim() : ''
+    if (provider === 'openai_compatible') {
+      let parsed: URL
+      try {
+        parsed = new URL(baseUrl)
+      } catch {
+        return bad('A valid local AI base URL is required')
+      }
+      const localDev =
+        process.env.NODE_ENV !== 'production' &&
+        (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1')
+      if (parsed.protocol !== 'https:' && !localDev) {
+        return bad('The local AI base URL must use HTTPS in production')
+      }
+    }
 
     const systemPrompt =
       typeof body.system_prompt === 'string' && body.system_prompt.trim()
@@ -100,7 +127,9 @@ export async function POST(request: Request) {
     // stranger); an empty string / null means "leave unassigned" (the
     // shared queue). Absent → left unchanged on update below.
     const rawHandoff =
-      typeof body.handoff_agent_id === 'string' ? body.handoff_agent_id.trim() : ''
+      typeof body.handoff_agent_id === 'string'
+        ? body.handoff_agent_id.trim()
+        : ''
     const handoffProvided = 'handoff_agent_id' in body
     let handoffAgentId: string | null = null
     if (rawHandoff) {
@@ -110,7 +139,8 @@ export async function POST(request: Request) {
         .eq('account_id', accountId)
         .eq('user_id', rawHandoff)
         .maybeSingle()
-      if (!member) return bad('handoff_agent_id must be a member of this account')
+      if (!member)
+        return bad('handoff_agent_id must be a member of this account')
       handoffAgentId = rawHandoff
     }
 
@@ -128,11 +158,11 @@ export async function POST(request: Request) {
     // Reuse the stored key when the form didn't send a fresh one.
     const { data: existing } = await supabase
       .from('ai_configs')
-      .select('id, provider, model, api_key')
+      .select('id, provider, model, api_key, base_url')
       .eq('account_id', accountId)
       .maybeSingle()
 
-    let apiKeyPlain: string
+    let apiKeyPlain: string | null
     if (rawKey) {
       apiKeyPlain = rawKey
     } else if (existing?.api_key) {
@@ -141,8 +171,10 @@ export async function POST(request: Request) {
       } catch {
         return bad('Stored API key could not be decrypted — re-enter your key.')
       }
-    } else {
+    } else if (provider !== 'openai_compatible') {
       return bad('api_key is required')
+    } else {
+      apiKeyPlain = null
     }
 
     // Only spend a provider round-trip when the credentials that affect
@@ -153,7 +185,8 @@ export async function POST(request: Request) {
       !existing ||
       rawKey !== '' ||
       provider !== existing.provider ||
-      model !== existing.model
+      model !== existing.model ||
+      (provider === 'openai_compatible' && baseUrl !== existing.base_url)
 
     if (credentialsChanged) {
       try {
@@ -161,6 +194,7 @@ export async function POST(request: Request) {
           provider,
           model,
           apiKey: apiKeyPlain,
+          baseUrl: provider === 'openai_compatible' ? baseUrl : null,
           systemPrompt,
           isActive,
           autoReplyEnabled,
@@ -172,7 +206,7 @@ export async function POST(request: Request) {
         if (err instanceof AiError) {
           return NextResponse.json(
             { error: err.message, code: err.code },
-            { status: 400 },
+            { status: 400 }
           )
         }
         console.error('[ai/config POST] validation error:', err)
@@ -189,7 +223,7 @@ export async function POST(request: Request) {
         if (err instanceof AiError) {
           return NextResponse.json(
             { error: `Embeddings key: ${err.message}`, code: err.code },
-            { status: 400 },
+            { status: 400 }
           )
         }
         console.error('[ai/config POST] embeddings validation error:', err)
@@ -201,6 +235,8 @@ export async function POST(request: Request) {
     const shared: Record<string, unknown> = {
       provider,
       model,
+      base_url:
+        provider === 'openai_compatible' ? baseUrl.replace(/\/$/, '') : null,
       system_prompt: systemPrompt,
       is_active: isActive,
       auto_reply_enabled: autoReplyEnabled,
@@ -224,7 +260,7 @@ export async function POST(request: Request) {
         console.error('[ai/config POST] update error:', upErr)
         return NextResponse.json(
           { error: 'Failed to save AI configuration' },
-          { status: 500 },
+          { status: 500 }
         )
       }
     } else {
@@ -238,7 +274,7 @@ export async function POST(request: Request) {
         console.error('[ai/config POST] insert error:', insErr)
         return NextResponse.json(
           { error: 'Failed to save AI configuration' },
-          { status: 500 },
+          { status: 500 }
         )
       }
     }
@@ -266,7 +302,7 @@ export async function DELETE() {
       console.error('[ai/config DELETE] error:', error)
       return NextResponse.json(
         { error: 'Failed to delete AI configuration' },
-        { status: 500 },
+        { status: 500 }
       )
     }
     return NextResponse.json({ success: true })

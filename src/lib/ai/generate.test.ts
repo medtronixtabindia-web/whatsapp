@@ -76,7 +76,7 @@ describe('generateReply — OpenAI', () => {
       okResponse({
         choices: [{ message: { content: 'Sure — happy to help!' } }],
         usage: { prompt_tokens: 42, completion_tokens: 8, total_tokens: 50 },
-      }),
+      })
     )
     vi.stubGlobal('fetch', fetchMock)
 
@@ -99,9 +99,11 @@ describe('generateReply — OpenAI', () => {
   it('maps a 401 to an invalid_key AiError', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        errResponse(401, { error: { message: 'Incorrect API key' } }),
-      ),
+      vi
+        .fn()
+        .mockResolvedValue(
+          errResponse(401, { error: { message: 'Incorrect API key' } })
+        )
     )
 
     await expect(
@@ -109,21 +111,25 @@ describe('generateReply — OpenAI', () => {
         config: config(),
         systemPrompt: 'sys',
         messages: [{ role: 'user', content: 'Hi' }],
-      }),
+      })
     ).rejects.toMatchObject({ code: 'invalid_key', status: 401 })
   })
 
   it('throws on an empty completion', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(okResponse({ choices: [{ message: { content: '' } }] })),
+      vi
+        .fn()
+        .mockResolvedValue(
+          okResponse({ choices: [{ message: { content: '' } }] })
+        )
     )
     await expect(
       generateReply({
         config: config(),
         systemPrompt: 'sys',
         messages: [{ role: 'user', content: 'Hi' }],
-      }),
+      })
     ).rejects.toBeInstanceOf(AiError)
   })
 })
@@ -134,7 +140,7 @@ describe('generateReply — Anthropic', () => {
       okResponse({
         content: [{ type: 'text', text: 'Hi there!' }],
         usage: { input_tokens: 30, output_tokens: 6 },
-      }),
+      })
     )
     vi.stubGlobal('fetch', fetchMock)
 
@@ -159,9 +165,11 @@ describe('generateReply — Anthropic', () => {
   it('detects handoff in the model output', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        okResponse({ content: [{ type: 'text', text: '[[HANDOFF]]' }] }),
-      ),
+      vi
+        .fn()
+        .mockResolvedValue(
+          okResponse({ content: [{ type: 'text', text: '[[HANDOFF]]' }] })
+        )
     )
     const res = await generateReply({
       config: config({ provider: 'anthropic' }),
@@ -175,7 +183,9 @@ describe('generateReply — Anthropic', () => {
   it('drops a leading assistant turn so the payload starts on the customer', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValue(okResponse({ content: [{ type: 'text', text: 'ok' }] }))
+      .mockResolvedValue(
+        okResponse({ content: [{ type: 'text', text: 'ok' }] })
+      )
     vi.stubGlobal('fetch', fetchMock)
 
     await generateReply({
@@ -190,5 +200,32 @@ describe('generateReply — Anthropic', () => {
     const body = JSON.parse(fetchMock.mock.calls[0][1].body)
     expect(body.messages[0].role).toBe('user')
     expect(body.messages).toHaveLength(1)
+  })
+})
+
+describe('generateReply — OpenAI-compatible', () => {
+  it('uses the configured base URL without requiring an API key', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        okResponse({ choices: [{ message: { content: 'Local reply' } }] })
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await generateReply({
+      config: config({
+        provider: 'openai_compatible',
+        apiKey: null,
+        baseUrl: 'https://ollama.example/v1/',
+        model: 'qwen2.5:7b',
+      }),
+      systemPrompt: 'sys',
+      messages: [{ role: 'user', content: 'Hello' }],
+    })
+
+    expect(res.text).toBe('Local reply')
+    const [url, opts] = fetchMock.mock.calls[0]
+    expect(url).toBe('https://ollama.example/v1/chat/completions')
+    expect(opts.headers.Authorization).toBeUndefined()
   })
 })
